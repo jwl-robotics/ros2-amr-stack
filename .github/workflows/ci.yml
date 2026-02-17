@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ===========================================================================
+  # Job 1: Build the workspace inside the Docker container
+  # ===========================================================================
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: ros2-amr-stack:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify colcon build inside container
+        run: |
+          docker run --rm ros2-amr-stack:ci bash -c \
+            "source /opt/ros/humble/setup.bash && \
+             cd /ros2_ws && \
+             colcon build --symlink-install"
+
+  # ===========================================================================
+  # Job 2: Lint Python (flake8) and C++ (clang-format)
+  # ===========================================================================
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install linting tools
+        run: |
+          pip install flake8
+          sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Run flake8 on Python sources
+        run: |
+          flake8 src/ \
+            --max-line-length=120 \
+            --extend-ignore=E203,W503 \
+            --exclude='__pycache__,*.egg-info'
+
+      - name: Check clang-format on C++ sources
+        run: |
+          CPP_FILES=$(find src/ -type f \( -name '*.cpp' -o -name '*.hpp' \))
+          if [ -n "$CPP_FILES" ]; then
+            echo "$CPP_FILES" | xargs clang-format --dry-run --Werror
+          else
+            echo "No C++ files found, skipping clang-format."
+          fi
+
+  # ===========================================================================
+  # Job 3: Run tests (colcon test + pytest)
+  # ===========================================================================
+  test:
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: ros2-amr-stack:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run colcon test
+        run: |
+          docker run --rm ros2-amr-stack:ci bash -c \
+            "source /opt/ros/humble/setup.bash && \
+             source /ros2_ws/install/setup.bash && \
+             cd /ros2_ws && \
+             colcon test --return-code-on-test-failure && \
+             colcon test-result --verbose"
+
+      - name: Run pytest
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/test:/ros2_ws/test \
+            ros2-amr-stack:ci bash -c \
+            "source /opt/ros/humble/setup.bash && \
+             source /ros2_ws/install/setup.bash && \
+             pip install pytest && \
+             cd /ros2_ws && \
+             python3 -m pytest test/ -v --tb=short"

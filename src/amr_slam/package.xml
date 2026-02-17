@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>amr_slam</name>
+  <version>0.1.0</version>
+  <description>SLAM configuration and launch files for the AMR stack</description>
+  <maintainer email="jinwei@todo.todo">Jinwei Lim</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>slam_toolbox</depend>
+  <depend>pointcloud_to_laserscan</depend>
+  <depend>nav2_map_server</depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

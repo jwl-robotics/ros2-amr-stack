@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>amr_bringup</name>
+  <version>0.1.0</version>
+  <description>Top-level bringup launch files for the AMR stack</description>
+  <maintainer email="jinwei@todo.todo">Jinwei Lim</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>amr_perception</depend>
+  <depend>amr_pointcloud_filter</depend>
+  <depend>amr_slam</depend>
+  <depend>amr_navigation</depend>
+  <depend>amr_description</depend>
+  <depend>warehouse_world</depend>
+  <depend>gazebo_ros</depend>
+  <depend>launch_ros</depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
