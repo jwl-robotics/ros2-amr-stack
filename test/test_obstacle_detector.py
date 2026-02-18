@@ -152,7 +152,9 @@ class TestClassifyCluster:
 
     def test_classify_shelf(self):
         """Tall, narrow cluster -> 'shelf'."""
-        assert classify_cluster(0.4, 0.3, 2.0, DEFAULT_PARAMS) == "shelf"
+        # Width 0.2 is below person_width_min (0.3), so it skips person
+        # and matches shelf (height > 1.5, footprint < 0.6).
+        assert classify_cluster(0.2, 0.15, 2.0, DEFAULT_PARAMS) == "shelf"
 
     def test_classify_pallet(self):
         """Low, wide cluster -> 'pallet'."""

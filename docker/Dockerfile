@@ -29,18 +29,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-tf2-geometry-msgs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir \
-    "numpy<2" \
-    open3d \
-    ultralytics \
-    opencv-python-headless
-
 # Copy source into the workspace
 WORKDIR /ros2_ws
 COPY src /ros2_ws/src
 
-# Build the workspace
+# Build the workspace (Python deps not needed for colcon build)
 RUN . /opt/ros/humble/setup.sh && \
     colcon build --symlink-install
 

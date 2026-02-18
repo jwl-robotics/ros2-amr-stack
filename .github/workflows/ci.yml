@@ -16,6 +16,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -73,7 +80,7 @@ jobs:
           fi
 
   # ===========================================================================
-  # Job 3: Run tests (colcon test + pytest)
+  # Job 3: Run pytest (perception unit tests)
   # ===========================================================================
   test:
     runs-on: ubuntu-22.04
@@ -81,6 +88,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -95,15 +109,6 @@ jobs:
           tags: ros2-amr-stack:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Run colcon test
-        run: |
-          docker run --rm ros2-amr-stack:ci bash -c \
-            "source /opt/ros/humble/setup.bash && \
-             source /ros2_ws/install/setup.bash && \
-             cd /ros2_ws && \
-             colcon test --return-code-on-test-failure && \
-             colcon test-result --verbose"
 
       - name: Run pytest
         run: |

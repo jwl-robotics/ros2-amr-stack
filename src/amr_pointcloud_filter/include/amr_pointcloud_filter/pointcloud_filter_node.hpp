@@ -18,8 +18,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-namespace amr_pointcloud_filter
-{
+namespace amr_pointcloud_filter {
 
 /// @brief ROS 2 node that applies a multi-stage PCL filter pipeline to
 ///        incoming 3-D LiDAR data and publishes the filtered result.
@@ -47,26 +46,25 @@ private:
   /// @param cloud  Input cloud (not modified).
   /// @return New cloud with reduced point count.
   pcl::PointCloud<pcl::PointXYZI>::Ptr applyVoxelFilter(
-    const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
+      const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
 
   /// @brief Remove points that fall outside the [min_range, max_range] sphere.
   /// @param cloud  Input cloud (not modified).
   /// @return New cloud containing only points within the valid range.
   pcl::PointCloud<pcl::PointXYZI>::Ptr applyRangeFilter(
-    const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
+      const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
 
   /// @brief Segment the ground plane with RANSAC and split the cloud.
   /// @param cloud  Input cloud (not modified).
   /// @return Pair of (non-ground / obstacle cloud, ground cloud).
-  std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr,
-            pcl::PointCloud<pcl::PointXYZI>::Ptr>
+  std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr>
   removeGround(const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
 
   /// @brief Remove sparse statistical outliers.
   /// @param cloud  Input cloud (not modified).
   /// @return New cloud with outliers removed.
   pcl::PointCloud<pcl::PointXYZI>::Ptr applyOutlierRemoval(
-    const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
+      const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud) const;
 
   // ---------------------------------------------------------------
   // ROS 2 interfaces

@@ -8,9 +8,8 @@ Produces two image streams:
 
 from __future__ import annotations
 
-import math
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -205,21 +204,6 @@ class PerceptionVizNode(Node):
                     cv2.LINE_AA,
                 )
 
-        # Overlay track IDs if available.
-        if self._latest_tracks is not None:
-            for det in self._latest_tracks.detections:
-                if det.results:
-                    track_label = det.results[0].hypothesis.class_id
-                    # Format: "class_name:track_id"
-                    parts = track_label.split(':')
-                    if len(parts) == 2:
-                        display_text = f'ID {parts[1]}'
-                        # Position in top-right corner of frame as a list.
-                        pos = det.bbox.center.position
-                        # We don't have pixel coords for 3D tracks; show in
-                        # a status block at the top of the image instead.
-                        # (Proper projection would require camera intrinsics.)
-
         # FPS counter in the top-left corner.
         fps_text = f'FPS: {self._fps:.1f}'
         cv2.putText(
@@ -261,7 +245,6 @@ class PerceptionVizNode(Node):
 
         size = self._bev_size
         scale = self._bev_scale
-        half = self._bev_range / 2.0
 
         # Blank dark image.
         bev = np.zeros((size, size, 3), dtype=np.uint8)
@@ -323,9 +306,7 @@ class PerceptionVizNode(Node):
             # Parse track info.
             class_name = 'unknown'
             track_id = 0
-            confidence = 0.0
             if det.results:
-                confidence = det.results[0].hypothesis.score
                 full_label = det.results[0].hypothesis.class_id
                 parts = full_label.split(':')
                 class_name = parts[0]
@@ -376,7 +357,7 @@ class PerceptionVizNode(Node):
     # --------------------------------------------------------------------- #
 
     @staticmethod
-    def _decode_image(msg: Image, cv2, np) -> Optional['np.ndarray']:
+    def _decode_image(msg, cv2, np):  # noqa: N805
         """Decode a sensor_msgs/Image to a BGR numpy array."""
         try:
             height = msg.height
@@ -419,12 +400,7 @@ class PerceptionVizNode(Node):
             return None
 
     @staticmethod
-    def _publish_image(
-        frame: 'np.ndarray',
-        publisher,
-        cv2,
-        np,
-    ) -> None:
+    def _publish_image(frame, publisher, cv2, np) -> None:
         """Encode a BGR numpy array as a sensor_msgs/Image and publish."""
         msg = Image()
         msg.height = frame.shape[0]

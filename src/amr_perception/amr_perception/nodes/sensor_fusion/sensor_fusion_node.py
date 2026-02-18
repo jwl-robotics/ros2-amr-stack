@@ -26,14 +26,7 @@ from vision_msgs.msg import (
     Detection3DArray,
     ObjectHypothesisWithPose,
 )
-from geometry_msgs.msg import (
-    Point,
-    Pose,
-    PoseWithCovariance,
-    Quaternion,
-    TransformStamped,
-    Vector3,
-)
+from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import Header
 
 
@@ -310,7 +303,7 @@ class SensorFusionNode(Node):
 
         return projected
 
-    def _decode_depth_image(self, depth_msg: Image, np) -> Optional['np.ndarray']:
+    def _decode_depth_image(self, depth_msg, np):
         """Convert a sensor_msgs/Image depth message to a numpy float array (metres)."""
         height = depth_msg.height
         width = depth_msg.width

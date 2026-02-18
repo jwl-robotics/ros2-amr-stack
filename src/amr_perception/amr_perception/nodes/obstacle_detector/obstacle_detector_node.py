@@ -16,10 +16,10 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2
 from vision_msgs.msg import Detection3DArray, Detection3D, ObjectHypothesisWithPose
 from visualization_msgs.msg import MarkerArray, Marker
-from geometry_msgs.msg import Point, Pose, Vector3
+from geometry_msgs.msg import Point
 from std_msgs.msg import Header, ColorRGBA
 
 

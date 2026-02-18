@@ -9,15 +9,12 @@
 
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithPose
-from std_msgs.msg import Header
 
 # cv_bridge is imported at the top level because it is a lightweight
 # wrapper with no heavy initialisation cost.
