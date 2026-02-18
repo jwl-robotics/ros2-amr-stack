@@ -1,7 +1,8 @@
 """Launch file for the Nav2 navigation stack.
 
-Includes the standard nav2_bringup launch and passes through the project's
-Nav2 parameter file together with the user-supplied map.
+When used alongside slam_toolbox (which provides map + localization),
+this launches only the navigation components: planner, controller,
+behavior server, costmaps, etc. -- NOT amcl or map_server.
 """
 
 import os
@@ -28,12 +29,6 @@ def generate_launch_description():
         description="Use simulation (Gazebo) clock if true",
     )
 
-    map_arg = DeclareLaunchArgument(
-        "map",
-        default_value="",
-        description="Full path to the map YAML file for nav2_map_server",
-    )
-
     params_file_arg = DeclareLaunchArgument(
         "params_file",
         default_value=default_params_file,
@@ -46,14 +41,16 @@ def generate_launch_description():
         description="Automatically start the Nav2 lifecycle nodes",
     )
 
-    # ----- Nav2 bringup -----
-    nav2_bringup_launch = IncludeLaunchDescription(
+    # ----- Nav2 navigation launch (no localization) -----
+    # Use nav2_bringup's navigation_launch.py which only starts
+    # planner, controller, behavior, smoother, velocity_smoother, bt_navigator,
+    # waypoint_follower, and lifecycle_manager -- NOT amcl or map_server.
+    nav2_navigation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_nav2_bringup, "launch", "bringup_launch.py")
+            os.path.join(pkg_nav2_bringup, "launch", "navigation_launch.py")
         ),
         launch_arguments={
             "use_sim_time": LaunchConfiguration("use_sim_time"),
-            "map": LaunchConfiguration("map"),
             "params_file": LaunchConfiguration("params_file"),
             "autostart": LaunchConfiguration("autostart"),
         }.items(),
@@ -62,9 +59,8 @@ def generate_launch_description():
     return LaunchDescription(
         [
             use_sim_time_arg,
-            map_arg,
             params_file_arg,
             autostart_arg,
-            nav2_bringup_launch,
+            nav2_navigation_launch,
         ]
     )

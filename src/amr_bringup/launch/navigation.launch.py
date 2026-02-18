@@ -27,12 +27,6 @@ def generate_launch_description():
         description="Use simulation (Gazebo) clock if true",
     )
 
-    map_arg = DeclareLaunchArgument(
-        "map",
-        default_value="",
-        description="Full path to the map YAML file for nav2_map_server",
-    )
-
     params_file_arg = DeclareLaunchArgument(
         "params_file",
         default_value=default_params_file,
@@ -48,7 +42,6 @@ def generate_launch_description():
         ),
         launch_arguments={
             "use_sim_time": LaunchConfiguration("use_sim_time"),
-            "map": LaunchConfiguration("map"),
             "params_file": LaunchConfiguration("params_file"),
         }.items(),
     )
@@ -56,7 +49,6 @@ def generate_launch_description():
     return LaunchDescription(
         [
             use_sim_time_arg,
-            map_arg,
             params_file_arg,
             navigation_launch,
         ]
