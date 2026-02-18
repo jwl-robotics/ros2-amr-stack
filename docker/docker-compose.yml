@@ -21,6 +21,8 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ../src:/ros2_ws/src
+      - ../test:/ros2_ws/test
+      - ../scripts:/ros2_ws/scripts
       - ../maps:/ros2_ws/maps
       - ../models:/ros2_ws/models
     stdin_open: true
