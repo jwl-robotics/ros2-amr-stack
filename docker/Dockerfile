@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-slam-toolbox \
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
+    ros-humble-nav2-smac-planner \
     ros-humble-gazebo-ros-pkgs \
     ros-humble-xacro \
     ros-humble-robot-state-publisher \
@@ -30,9 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 RUN pip3 install --no-cache-dir \
+    "numpy<2" \
     open3d \
     ultralytics \
-    numpy \
     opencv-python-headless
 
 # Copy source into the workspace
@@ -59,6 +60,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-slam-toolbox \
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
+    ros-humble-nav2-smac-planner \
     ros-humble-gazebo-ros-pkgs \
     ros-humble-xacro \
     ros-humble-robot-state-publisher \
@@ -73,9 +75,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python runtime dependencies
 RUN pip3 install --no-cache-dir \
+    "numpy<2" \
     open3d \
     ultralytics \
-    numpy \
     opencv-python-headless
 
 # Copy the built workspace from the build stage
@@ -87,6 +89,10 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=all
 
 WORKDIR /ros2_ws
+
+# Auto-source ROS2 and workspace in interactive shells
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo '[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash' >> /root/.bashrc
 
 # Entrypoint: source ROS2 and workspace, then execute the user command
 COPY docker/entrypoint.sh /entrypoint.sh
