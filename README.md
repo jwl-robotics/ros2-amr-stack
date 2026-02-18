@@ -147,9 +147,55 @@ ros2 launch amr_bringup slam.launch.py
 | `warehouse_world` | SDF/Gazebo | Simulated warehouse environment with shelving, pallets, and open floor space |
 | `amr_bringup` | Python | Top-level launch files that compose the full stack |
 
+## Robot Model
+
+The AMR is a differential-drive robot with the following components (as seen in Gazebo):
+
+| Part | Visual | Description |
+|---|---|---|
+| Chassis | Dark black box | Main body (0.6 x 0.4 x 0.15 m) |
+| Top plate | Orange plate | Cover on top of the chassis |
+| Front bumper | Orange bar | Indicates forward direction |
+| Drive wheels | Black discs (sides) | 2 powered wheels for differential drive |
+| Caster wheels | Grey balls (front/rear) | 2 passive casters for stability |
+| Sensor tower | Black cylinder | Raises the LiDAR above the chassis |
+| Velodyne VLP-16 | Blue cylinder (top) | 16-channel 3D LiDAR, 360 deg, 10 Hz |
+| RealSense D435 | Small silver box (front) | RGB-D depth camera, 640x480, 30 Hz |
+| IMU | (hidden inside chassis) | 100 Hz orientation and acceleration |
+
+## Visualization
+
+Multiple tools are available for inspecting the running system:
+
+**RViz2** -- Full 3D visualization. View point clouds, robot model, TF frames, maps, markers, laser scans, camera feeds, and costmaps overlaid in 3D space.
+
+```bash
+# In a separate container terminal
+rviz2
+# Add displays: /velodyne_points (PointCloud2), /camera/image_raw (Image),
+#   RobotModel, TF. Set Fixed Frame to "odom" or "base_link".
+```
+
+**rqt_image_view** -- Lightweight single-topic camera viewer.
+
+```bash
+ros2 run rqt_image_view rqt_image_view
+# Select /camera/image_raw from the dropdown
+```
+
+**Teleop** -- Drive the robot with keyboard controls.
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel
+# i=forward, ,=backward, j=turn left, l=turn right, k=stop
+# q/z=increase/decrease speed
+```
+
 ## Perception Pipeline
 
-The perception pipeline runs five interconnected nodes:
+The robot has two complementary sensors: a **Velodyne VLP-16 3D LiDAR** (360-degree coverage, accurate geometry, no color) and an **Intel RealSense D435 RGB-D camera** (forward-facing only, color + depth, enables object recognition via YOLOv8). The LiDAR detects obstacles in all directions using point cloud clustering, while the camera identifies specific object classes in its field of view. Sensor fusion merges detections from both sensors -- objects seen by both get higher confidence, especially when both agree on the class label. The fused detections are then tracked frame-to-frame with persistent IDs and velocity estimation.
+
+The pipeline runs five interconnected nodes:
 
 ### Obstacle Detector (`obstacle_detector_node`)
 
