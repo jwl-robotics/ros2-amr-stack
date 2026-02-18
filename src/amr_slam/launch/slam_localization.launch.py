@@ -45,8 +45,8 @@ def generate_launch_description():
             {
                 "use_sim_time": LaunchConfiguration("use_sim_time"),
                 "target_frame": "base_footprint",
-                "min_height": -0.1,
-                "max_height": 0.5,
+                "min_height": 0.1,
+                "max_height": 1.5,
                 "range_min": 0.3,
                 "range_max": 20.0,
                 "angle_min": -3.14159,
