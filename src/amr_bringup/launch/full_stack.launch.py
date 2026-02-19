@@ -39,18 +39,6 @@ def generate_launch_description():
         description="SLAM mode: 'mapping' or 'localization'",
     )
 
-    map_arg = DeclareLaunchArgument(
-        "map",
-        default_value="",
-        description="Full path to the map YAML file (navigation)",
-    )
-
-    map_file_path_arg = DeclareLaunchArgument(
-        "map_file_path",
-        default_value="",
-        description="Path to slam_toolbox pose-graph (localization mode)",
-    )
-
     use_sim_time = LaunchConfiguration("use_sim_time")
 
     # ----- 1. Simulation (Gazebo + robot description + spawn) -----
@@ -94,7 +82,6 @@ def generate_launch_description():
                 launch_arguments={
                     "use_sim_time": use_sim_time,
                     "mode": LaunchConfiguration("slam_mode"),
-                    "map_file_path": LaunchConfiguration("map_file_path"),
                 }.items(),
             ),
         ],
@@ -112,7 +99,6 @@ def generate_launch_description():
                 ),
                 launch_arguments={
                     "use_sim_time": use_sim_time,
-                    "map": LaunchConfiguration("map"),
                 }.items(),
             ),
         ],
@@ -123,8 +109,6 @@ def generate_launch_description():
             use_sim_time_arg,
             world_arg,
             slam_mode_arg,
-            map_arg,
-            map_file_path_arg,
             simulation_launch,
             perception_launch,
             slam_launch,
