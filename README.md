@@ -114,7 +114,7 @@ ros2_amr_stack/
 
 ```bash
 # Clone
-git clone https://github.com/jinweilim/ros2_amr_stack.git && cd ros2_amr_stack
+git clone https://github.com/jwl-robotics/ros2-amr-stack.git && cd ros2-amr-stack
 
 # Build and run with Docker
 cp .env.example .env
@@ -291,7 +291,7 @@ The GitHub Actions pipeline (`.github/workflows/ci.yml`) runs three jobs on ever
 
 1. **Build** -- Builds the Docker image and runs `colcon build` inside the container.
 2. **Lint** -- Runs `flake8` on Python sources and `clang-format` on C++ sources.
-3. **Test** -- Runs `colcon test` for package-level tests and `pytest` for the unit test suite in `test/`.
+3. **Test** -- Runs the `pytest` unit test suite covering perception logic (28 tests).
 
 ## License
 
