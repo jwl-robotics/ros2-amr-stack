@@ -19,6 +19,11 @@ from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     pkg_amr_bringup = get_package_share_directory("amr_bringup")
+    pkg_amr_navigation = get_package_share_directory("amr_navigation")
+
+    nav2_params_file = os.path.join(
+        pkg_amr_navigation, "config", "nav2_params.yaml"
+    )
 
     # ----- Launch arguments -----
     use_sim_time_arg = DeclareLaunchArgument(
@@ -88,6 +93,10 @@ def generate_launch_description():
     )
 
     # ----- 4. Navigation (delay to let SLAM publish map) -----
+    # NOTE: params_file is passed explicitly to avoid a ROS2 Humble launch
+    # scoping issue where an earlier IncludeLaunchDescription (e.g. Gazebo)
+    # can leak an empty-string 'params_file' into the global context,
+    # preventing DeclareLaunchArgument defaults from applying.
     navigation_launch = TimerAction(
         period=12.0,
         actions=[
@@ -99,6 +108,7 @@ def generate_launch_description():
                 ),
                 launch_arguments={
                     "use_sim_time": use_sim_time,
+                    "params_file": nav2_params_file,
                 }.items(),
             ),
         ],
