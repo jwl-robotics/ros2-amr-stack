@@ -17,8 +17,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Jinwei Lim',
-    maintainer_email='jinwei@todo.todo',
+    maintainer='Jin Wei Lim',
+    maintainer_email='jinweilim22@hotmail.com',
     description='SLAM configuration and launch files for the AMR stack',
     license='MIT',
     entry_points={

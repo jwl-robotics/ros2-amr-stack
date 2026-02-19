@@ -4,7 +4,7 @@
   <name>amr_navigation</name>
   <version>0.1.0</version>
   <description>Navigation configuration and launch files for the AMR stack</description>
-  <maintainer email="jinwei@todo.todo">Jinwei Lim</maintainer>
+  <maintainer email="jinweilim22@hotmail.com">Jin Wei Lim</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>

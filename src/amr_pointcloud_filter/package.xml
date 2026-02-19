@@ -4,7 +4,7 @@
   <name>amr_pointcloud_filter</name>
   <version>0.1.0</version>
   <description>C++ PCL-based pointcloud filtering node for the AMR platform</description>
-  <maintainer email="developer@todo.todo">developer</maintainer>
+  <maintainer email="jinweilim22@hotmail.com">Jin Wei Lim</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

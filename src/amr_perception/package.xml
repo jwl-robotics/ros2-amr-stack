@@ -4,7 +4,7 @@
   <name>amr_perception</name>
   <version>0.1.0</version>
   <description>Perception pipeline for warehouse AMR: obstacle detection, camera detection, sensor fusion, object tracking</description>
-  <maintainer email="jinwei@example.com">Jinwei Lim</maintainer>
+  <maintainer email="jinweilim22@hotmail.com">Jin Wei Lim</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
