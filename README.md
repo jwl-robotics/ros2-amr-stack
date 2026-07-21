@@ -4,8 +4,13 @@
 
 ![Warehouse AMR — simulation and live-built SLAM map](docs/hero.gif)
 
-*Left: the simulated warehouse with the AMR driving among the racks, LiDAR returns visible. Right: the
-occupancy map built online with slam_toolbox — the same racks, now obstacles in the grid.*
+*Phase 1 — mapping: the AMR drives the warehouse (left) while slam_toolbox builds the occupancy map
+online (right) — the same racks, now obstacles in the grid.*
+
+![Waypoint navigation on the finished map](docs/nav.gif)
+
+*Phase 2 — navigation: a goal is clicked on the finished map; Nav2's Hybrid-A\* plans the path (green)
+and the robot drives it autonomously — onboard camera view bottom-left.*
 
 ## Overview
 
