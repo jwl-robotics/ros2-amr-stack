@@ -2,6 +2,11 @@
 
 **Full-stack autonomous mobile robot demo for warehouse environments**
 
+![Warehouse AMR — simulation and live-built SLAM map](docs/hero.gif)
+
+*Left: the simulated warehouse with the AMR driving among the racks, LiDAR returns visible. Right: the
+occupancy map built online with slam_toolbox — the same racks, now obstacles in the grid.*
+
 ## Overview
 
 A ROS 2 Humble project demonstrating a complete perception, SLAM, and navigation pipeline for an autonomous mobile robot (AMR) operating in a simulated warehouse. The system processes raw 3D LiDAR and RGB-D camera data through a multi-stage perception pipeline, builds a map with SLAM, and navigates autonomously using Nav2.
