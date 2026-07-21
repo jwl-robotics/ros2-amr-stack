@@ -66,9 +66,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-tf2-geometry-msgs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python runtime dependencies
+# Install Python runtime dependencies.
+# packaging>=22 keeps colcon/setup.py builds working when a pip-installed setuptools
+# shadows the distro one (canonicalize_version strip_trailing_zero API).
 RUN pip3 install --no-cache-dir \
     "numpy<2" \
+    "packaging>=22" \
     open3d \
     ultralytics \
     opencv-python-headless
