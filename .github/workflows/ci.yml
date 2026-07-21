@@ -42,6 +42,7 @@ jobs:
           docker run --rm ros2-amr-stack:ci bash -c \
             "source /opt/ros/humble/setup.bash && \
              cd /ros2_ws && \
+             rm -rf build install log && \
              colcon build --symlink-install"
 
   # ===========================================================================
