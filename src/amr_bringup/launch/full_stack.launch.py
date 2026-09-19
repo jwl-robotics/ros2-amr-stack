@@ -2,6 +2,17 @@
 
 Launches every subsystem of the AMR stack in one go. Intended for
 end-to-end testing in the Gazebo warehouse simulation.
+
+Start-up ordering
+-----------------
+The stages after the simulation are staggered with fixed TimerAction delays.
+Nothing depends on those delays for correctness: ROS 2 pub/sub is late-join
+tolerant, so a node started before its inputs exist simply waits for them;
+slam_toolbox blocks until scans and TF arrive; Nav2 is brought up by its own
+lifecycle_manager and its costmaps retry until the map frame exists. The
+delays only keep the start-up logs free of "waiting for transform" noise
+while Gazebo loads. On a machine where Gazebo takes longer than these
+delays the stack still converges, just more noisily.
 """
 
 import os
@@ -57,7 +68,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # ----- 2. Perception pipeline (delay to let Gazebo start) -----
+    # ----- 2. Perception pipeline (staggered, see module docstring) -----
     perception_launch = TimerAction(
         period=5.0,
         actions=[
@@ -74,7 +85,7 @@ def generate_launch_description():
         ],
     )
 
-    # ----- 3. SLAM (delay to let perception start) -----
+    # ----- 3. SLAM (staggered, see module docstring) -----
     slam_launch = TimerAction(
         period=8.0,
         actions=[
@@ -92,7 +103,7 @@ def generate_launch_description():
         ],
     )
 
-    # ----- 4. Navigation (delay to let SLAM publish map) -----
+    # ----- 4. Navigation (staggered, see module docstring) -----
     # NOTE: params_file is passed explicitly to avoid a ROS2 Humble launch
     # scoping issue where an earlier IncludeLaunchDescription (e.g. Gazebo)
     # can leak an empty-string 'params_file' into the global context,
