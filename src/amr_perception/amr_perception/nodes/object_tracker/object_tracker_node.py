@@ -1,18 +1,15 @@
 """
 Object tracker node for the AMR perception pipeline.
 
-Maintains persistent track identities across frames using greedy
-nearest-neighbour association with exponential-moving-average velocity
-estimation.  Publishes confirmed tracks as Detection3DArray and a
-MarkerArray for RViz visualisation.
+Maintains persistent track identities across frames and publishes confirmed
+tracks as Detection3DArray plus a MarkerArray for RViz.  The association and
+update rules live in ``amr_perception.tracking_logic``; this node only adapts
+ROS messages to that module.
 """
 
 from __future__ import annotations
 
-import math
-import time
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -27,34 +24,7 @@ from vision_msgs.msg import (
 )
 from visualization_msgs.msg import Marker, MarkerArray
 
-
-def _lazy_import_numpy():
-    """Lazy import for numpy to speed up node discovery."""
-    import numpy as np
-    return np
-
-
-# --------------------------------------------------------------------------- #
-# Track data structure
-# --------------------------------------------------------------------------- #
-
-
-@dataclass
-class Track:
-    """Internal representation of a tracked object."""
-
-    id: int
-    x: float
-    y: float
-    z: float
-    vx: float = 0.0
-    vy: float = 0.0
-    vz: float = 0.0
-    class_name: str = 'unknown'
-    confidence: float = 0.0
-    hits: int = 1
-    lost_count: int = 0
-    last_seen_time: float = 0.0
+from amr_perception.tracking_logic import Observation, Track, Tracker
 
 
 # --------------------------------------------------------------------------- #
@@ -98,26 +68,24 @@ class ObjectTrackerNode(Node):
         self.declare_parameter('min_hits_to_confirm', 3)
         self.declare_parameter('velocity_smoothing_alpha', 0.3)
 
-        self._assoc_thresh: float = (
-            self.get_parameter('association_threshold')
-            .get_parameter_value().double_value
+        self._tracker = Tracker(
+            association_threshold=(
+                self.get_parameter('association_threshold')
+                .get_parameter_value().double_value
+            ),
+            max_lost=(
+                self.get_parameter('max_lost_frames')
+                .get_parameter_value().integer_value
+            ),
+            min_hits=(
+                self.get_parameter('min_hits_to_confirm')
+                .get_parameter_value().integer_value
+            ),
+            alpha=(
+                self.get_parameter('velocity_smoothing_alpha')
+                .get_parameter_value().double_value
+            ),
         )
-        self._max_lost: int = (
-            self.get_parameter('max_lost_frames')
-            .get_parameter_value().integer_value
-        )
-        self._min_hits: int = (
-            self.get_parameter('min_hits_to_confirm')
-            .get_parameter_value().integer_value
-        )
-        self._alpha: float = (
-            self.get_parameter('velocity_smoothing_alpha')
-            .get_parameter_value().double_value
-        )
-
-        # -- Internal state ----------------------------------------------
-        self._tracks: Dict[int, Track] = {}
-        self._next_id: int = 0
 
         # -- Publishers --------------------------------------------------
         self._tracked_pub = self.create_publisher(
@@ -137,10 +105,10 @@ class ObjectTrackerNode(Node):
 
         self.get_logger().info(
             f'ObjectTrackerNode initialised '
-            f'(assoc_thresh={self._assoc_thresh:.2f}, '
-            f'max_lost={self._max_lost}, '
-            f'min_hits={self._min_hits}, '
-            f'alpha={self._alpha:.2f})'
+            f'(assoc_thresh={self._tracker.association_threshold:.2f}, '
+            f'max_lost={self._tracker.max_lost}, '
+            f'min_hits={self._tracker.min_hits}, '
+            f'alpha={self._tracker.alpha:.2f})'
         )
 
     # --------------------------------------------------------------------- #
@@ -148,93 +116,28 @@ class ObjectTrackerNode(Node):
     # --------------------------------------------------------------------- #
 
     def _detections_callback(self, msg: Detection3DArray) -> None:
-        np = _lazy_import_numpy()
-        now = time.monotonic()
+        # Node clock so that dt (and hence velocity) follows use_sim_time.
+        now = self.get_clock().now().nanoseconds * 1e-9
 
-        # 1. Extract detection positions and metadata.
-        det_positions: List[Tuple[float, float, float]] = []
-        det_classes: List[str] = []
-        det_confs: List[float] = []
-
+        observations: List[Observation] = []
         for det in msg.detections:
             pos = det.bbox.center.position
-            det_positions.append((pos.x, pos.y, pos.z))
             if det.results:
-                det_classes.append(det.results[0].hypothesis.class_id)
-                det_confs.append(det.results[0].hypothesis.score)
+                hyp = det.results[0].hypothesis
+                observations.append(Observation(pos.x, pos.y, pos.z, hyp.class_id, hyp.score))
             else:
-                det_classes.append('unknown')
-                det_confs.append(0.0)
+                observations.append(Observation(pos.x, pos.y, pos.z))
 
-        # 2. Associate detections with existing tracks.
-        matched, unmatched_dets, unmatched_tracks = self._associate(
-            det_positions, np
-        )
+        removed = self._tracker.update(observations, now)
 
-        # 3. Update matched tracks.
-        for det_idx, track_id in matched:
-            track = self._tracks[track_id]
-            dx, dy, dz = det_positions[det_idx]
-
-            dt = now - track.last_seen_time if track.last_seen_time > 0.0 else 0.0
-
-            # Compute instantaneous velocity.
-            if dt > 1e-6:
-                inst_vx = (dx - track.x) / dt
-                inst_vy = (dy - track.y) / dt
-                inst_vz = (dz - track.z) / dt
-            else:
-                inst_vx = inst_vy = inst_vz = 0.0
-
-            # Exponential moving average for velocity.
-            a = self._alpha
-            track.vx = a * inst_vx + (1.0 - a) * track.vx
-            track.vy = a * inst_vy + (1.0 - a) * track.vy
-            track.vz = a * inst_vz + (1.0 - a) * track.vz
-
-            # Update position with smoothing.
-            track.x = a * dx + (1.0 - a) * track.x
-            track.y = a * dy + (1.0 - a) * track.y
-            track.z = a * dz + (1.0 - a) * track.z
-
-            track.class_name = det_classes[det_idx]
-            track.confidence = det_confs[det_idx]
-            track.hits += 1
-            track.lost_count = 0
-            track.last_seen_time = now
-
-        # 4. Create new tracks for unmatched detections.
-        for det_idx in unmatched_dets:
-            dx, dy, dz = det_positions[det_idx]
-            track = Track(
-                id=self._next_id,
-                x=dx, y=dy, z=dz,
-                class_name=det_classes[det_idx],
-                confidence=det_confs[det_idx],
-                last_seen_time=now,
-            )
-            self._tracks[self._next_id] = track
-            self._next_id += 1
-
-        # 5. Handle unmatched (lost) tracks.
-        to_remove: List[int] = []
-        for track_id in unmatched_tracks:
-            self._tracks[track_id].lost_count += 1
-            if self._tracks[track_id].lost_count > self._max_lost:
-                to_remove.append(track_id)
-        for track_id in to_remove:
-            del self._tracks[track_id]
-
-        # 6. Publish confirmed tracks as Detection3DArray.
+        # Publish confirmed tracks as Detection3DArray.
         frame_id = msg.header.frame_id if msg.header.frame_id else 'velodyne_link'
         stamp = self.get_clock().now().to_msg()
 
         out_msg = Detection3DArray()
         out_msg.header = Header(stamp=stamp, frame_id=frame_id)
 
-        confirmed_tracks: List[Track] = [
-            t for t in self._tracks.values() if t.hits >= self._min_hits
-        ]
+        confirmed_tracks: List[Track] = self._tracker.confirmed()
 
         for track in confirmed_tracks:
             det = Detection3D()
@@ -254,68 +157,14 @@ class ObjectTrackerNode(Node):
 
         self._tracked_pub.publish(out_msg)
 
-        # 7. Publish visualisation markers.
+        # Publish visualisation markers.
         self._publish_markers(confirmed_tracks, stamp, frame_id)
 
         self.get_logger().debug(
-            f'Tracking: {len(self._tracks)} total, '
+            f'Tracking: {len(self._tracker.tracks)} total, '
             f'{len(confirmed_tracks)} confirmed, '
-            f'{len(to_remove)} removed'
+            f'{len(removed)} removed'
         )
-
-    # --------------------------------------------------------------------- #
-    # Association
-    # --------------------------------------------------------------------- #
-
-    def _associate(
-        self,
-        det_positions: List[Tuple[float, float, float]],
-        np,
-    ) -> Tuple[
-        List[Tuple[int, int]],  # (det_idx, track_id) matched pairs
-        List[int],              # unmatched detection indices
-        List[int],              # unmatched track IDs
-    ]:
-        """Greedy nearest-neighbour association."""
-        track_ids = list(self._tracks.keys())
-        n_det = len(det_positions)
-        n_trk = len(track_ids)
-
-        if n_det == 0:
-            return [], [], list(track_ids)
-        if n_trk == 0:
-            return [], list(range(n_det)), []
-
-        # Build cost matrix (n_det x n_trk).
-        cost = np.zeros((n_det, n_trk), dtype=np.float64)
-        for i, (dx, dy, dz) in enumerate(det_positions):
-            for j, tid in enumerate(track_ids):
-                t = self._tracks[tid]
-                cost[i, j] = math.sqrt(
-                    (dx - t.x) ** 2 + (dy - t.y) ** 2 + (dz - t.z) ** 2
-                )
-
-        matched: List[Tuple[int, int]] = []
-        used_dets: set = set()
-        used_trks: set = set()
-
-        # Greedy: iterate in order of ascending distance.
-        flat = np.argsort(cost, axis=None)
-        for flat_idx in flat:
-            di = int(flat_idx // n_trk)
-            tj = int(flat_idx % n_trk)
-            if di in used_dets or tj in used_trks:
-                continue
-            if cost[di, tj] > self._assoc_thresh:
-                break
-            matched.append((di, track_ids[tj]))
-            used_dets.add(di)
-            used_trks.add(tj)
-
-        unmatched_dets = [i for i in range(n_det) if i not in used_dets]
-        unmatched_trks = [track_ids[j] for j in range(n_trk) if j not in used_trks]
-
-        return matched, unmatched_dets, unmatched_trks
 
     # --------------------------------------------------------------------- #
     # Visualisation
@@ -356,10 +205,7 @@ class ObjectTrackerNode(Node):
             marker_array.markers.append(text_marker)
 
             # -- Velocity arrow -----------------------------------------------
-            speed = math.sqrt(
-                track.vx ** 2 + track.vy ** 2 + track.vz ** 2
-            )
-            if speed > 0.05:  # Only draw arrow if moving appreciably.
+            if track.speed > 0.05:  # Only draw arrow if moving appreciably.
                 arrow = Marker()
                 arrow.header.stamp = stamp
                 arrow.header.frame_id = frame_id

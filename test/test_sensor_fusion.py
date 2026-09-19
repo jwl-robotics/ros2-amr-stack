@@ -1,276 +1,234 @@
 # Copyright 2025 AMR Stack Authors
 # Licensed under MIT
 #
-# Unit tests for the sensor fusion logic.
-# All tests are pure Python -- no ROS runtime required.  We define a
-# lightweight fusion helper that mirrors the association / merging rules
-# that the real sensor_fusion_node would use, so the logic can be validated
-# independently of the ROS 2 plumbing.
+# Unit tests for amr_perception.fusion_logic -- the association, merging and
+# projection code the sensor_fusion node runs.  No ROS runtime required.
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+import math
 
 import numpy as np
 import pytest
 
+from amr_perception.fusion_logic import (
+    AGREEMENT_BONUS,
+    CameraIntrinsics,
+    LidarDetection,
+    PixelDetection,
+    ProjectedDetection,
+    RigidTransform,
+    associate,
+    decode_depth_image,
+    merge_labels,
+    project_camera_detections,
+)
 
-# ---------------------------------------------------------------------------
-# Minimal Detection data-class (mirrors the information in Detection3D)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Detection:
-    """Lightweight detection used by the fusion logic under test."""
-
-    x: float
-    y: float
-    z: float
-    width: float = 0.0
-    depth: float = 0.0
-    height: float = 0.0
-    class_name: str = "obstacle"
-    confidence: float = 1.0
-    source: str = "lidar"  # "lidar" or "camera"
+W_LIDAR = 0.6
+W_CAMERA = 0.4
 
 
-# ---------------------------------------------------------------------------
-# Fusion helpers (extracted logic, testable without ROS)
-# ---------------------------------------------------------------------------
+def lidar(x, y, z, class_name="obstacle", confidence=1.0):
+    return LidarDetection(x, y, z, class_name, confidence)
 
 
-def euclidean_distance(a: Detection, b: Detection) -> float:
-    """3-D Euclidean distance between two detection centres."""
-    return float(np.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2))
-
-
-def associate_detections(
-    lidar_dets: List[Detection],
-    camera_dets: List[Detection],
-    distance_threshold: float = 1.0,
-) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
-    """Greedy nearest-neighbour association between LiDAR and camera detections.
-
-    Returns
-    -------
-    matched : list of (lidar_idx, camera_idx)
-    unmatched_lidar : list of lidar indices
-    unmatched_camera : list of camera indices
-    """
-    if not lidar_dets or not camera_dets:
-        return (
-            [],
-            list(range(len(lidar_dets))),
-            list(range(len(camera_dets))),
-        )
-
-    # Build distance matrix.
-    n_lidar = len(lidar_dets)
-    n_camera = len(camera_dets)
-    dist_matrix = np.zeros((n_lidar, n_camera))
-    for i, ld in enumerate(lidar_dets):
-        for j, cd in enumerate(camera_dets):
-            dist_matrix[i, j] = euclidean_distance(ld, cd)
-
-    matched: List[Tuple[int, int]] = []
-    used_lidar = set()
-    used_camera = set()
-
-    # Greedy assignment: pick the closest pair first.
-    flat_order = np.argsort(dist_matrix, axis=None)
-    for flat_idx in flat_order:
-        li = int(flat_idx // n_camera)
-        ci = int(flat_idx % n_camera)
-        if li in used_lidar or ci in used_camera:
-            continue
-        if dist_matrix[li, ci] > distance_threshold:
-            break
-        matched.append((li, ci))
-        used_lidar.add(li)
-        used_camera.add(ci)
-
-    unmatched_lidar = [i for i in range(n_lidar) if i not in used_lidar]
-    unmatched_camera = [i for i in range(n_camera) if i not in used_camera]
-    return matched, unmatched_lidar, unmatched_camera
-
-
-def merge_detection(
-    lidar_det: Detection,
-    camera_det: Detection,
-    lidar_weight: float = 0.6,
-) -> Detection:
-    """Merge a matched LiDAR + camera detection pair.
-
-    Position is taken from the LiDAR detection (more accurate in 3-D).
-    Confidence is a weighted average. When both sensors agree on the class,
-    confidence gets a bonus. When they disagree, the class from the
-    higher-confidence source wins.
-    """
-    camera_weight = 1.0 - lidar_weight
-    merged_confidence = (
-        lidar_det.confidence * lidar_weight
-        + camera_det.confidence * camera_weight
-    )
-
-    if lidar_det.class_name == camera_det.class_name:
-        # Agreement bonus -- cap at 1.0.
-        merged_confidence = min(merged_confidence * 1.2, 1.0)
-        merged_class = lidar_det.class_name
-    else:
-        # Disagreement: trust the source with higher confidence.
-        if lidar_det.confidence >= camera_det.confidence:
-            merged_class = lidar_det.class_name
-        else:
-            merged_class = camera_det.class_name
-
-    return Detection(
-        x=lidar_det.x,
-        y=lidar_det.y,
-        z=lidar_det.z,
-        width=lidar_det.width,
-        depth=lidar_det.depth,
-        height=lidar_det.height,
-        class_name=merged_class,
-        confidence=merged_confidence,
-        source="fused",
-    )
-
-
-def fuse(
-    lidar_dets: List[Detection],
-    camera_dets: List[Detection],
-    distance_threshold: float = 1.0,
-) -> List[Detection]:
-    """Run the full fusion pipeline and return a merged detection list."""
-    matched, unmatched_l, unmatched_c = associate_detections(
-        lidar_dets, camera_dets, distance_threshold
-    )
-
-    output: List[Detection] = []
-    for li, ci in matched:
-        output.append(merge_detection(lidar_dets[li], camera_dets[ci]))
-    for li in unmatched_l:
-        output.append(lidar_dets[li])
-    for ci in unmatched_c:
-        output.append(camera_dets[ci])
-    return output
+def camera(x, y, z, class_name="obstacle", confidence=1.0):
+    return ProjectedDetection(x, y, z, class_name, confidence)
 
 
 # ===================================================================
-# Tests
+# Association
 # ===================================================================
 
 
 class TestAssociation:
-    """Tests for detection association (matching)."""
 
-    def test_association_close_detections(self):
-        """Two detections within the threshold should be matched."""
-        lidar = [Detection(x=1.0, y=2.0, z=0.0, class_name="person", confidence=0.9)]
-        camera = [Detection(x=1.05, y=2.05, z=0.0, class_name="person", confidence=0.8)]
-
-        matched, unmatched_l, unmatched_c = associate_detections(
-            lidar, camera, distance_threshold=1.0
+    def test_close_detections_match(self):
+        matched, unmatched_l, unmatched_c = associate(
+            [lidar(1.0, 2.0, 0.0, "person", 0.9)],
+            [camera(1.05, 2.05, 0.0, "person", 0.8)],
+            distance_threshold=1.0,
         )
+        assert matched == [(0, 0)]
+        assert unmatched_l == []
+        assert unmatched_c == []
 
+    def test_far_detections_stay_unmatched(self):
+        matched, unmatched_l, unmatched_c = associate(
+            [lidar(0.0, 0.0, 0.0)], [camera(10.0, 10.0, 0.0)], distance_threshold=1.0
+        )
+        assert matched == []
+        assert unmatched_l == [0]
+        assert unmatched_c == [0]
+
+    def test_empty_inputs_pass_through(self):
+        assert associate([], [], 1.0) == ([], [], [])
+        assert associate([lidar(1, 2, 0)], [], 1.0) == ([], [0], [])
+        assert associate([], [camera(3, 4, 0)], 1.0) == ([], [], [0])
+
+    def test_greedy_takes_closest_pair_first(self):
+        # Camera det 0 is near both lidar dets, but closest to lidar det 1.
+        li = [lidar(0.0, 0.0, 0.0), lidar(0.5, 0.0, 0.0)]
+        c = [camera(0.6, 0.0, 0.0), camera(5.0, 0.0, 0.0)]
+        matched, unmatched_l, unmatched_c = associate(li, c, distance_threshold=1.0)
+        assert matched == [(1, 0)]
+        assert unmatched_l == [0]
+        assert unmatched_c == [1]
+
+    def test_one_to_one(self):
+        # Two lidar dets both near one camera det: only one may claim it.
+        li = [lidar(0.0, 0.0, 0.0), lidar(0.1, 0.0, 0.0)]
+        c = [camera(0.05, 0.0, 0.0)]
+        matched, unmatched_l, _ = associate(li, c, distance_threshold=1.0)
         assert len(matched) == 1
-        assert matched[0] == (0, 0)
-        assert len(unmatched_l) == 0
-        assert len(unmatched_c) == 0
-
-    def test_association_far_detections(self):
-        """Two detections far apart should remain unmatched."""
-        lidar = [Detection(x=0.0, y=0.0, z=0.0)]
-        camera = [Detection(x=10.0, y=10.0, z=0.0)]
-
-        matched, unmatched_l, unmatched_c = associate_detections(
-            lidar, camera, distance_threshold=1.0
-        )
-
-        assert len(matched) == 0
         assert len(unmatched_l) == 1
-        assert len(unmatched_c) == 1
 
 
-class TestConfidenceMerging:
-    """Tests for confidence calculation during merging."""
-
-    def test_confidence_merging(self):
-        """Weighted confidence should combine both sources correctly."""
-        lidar = Detection(x=1.0, y=2.0, z=0.0, class_name="obstacle",
-                          confidence=0.9, source="lidar")
-        camera = Detection(x=1.0, y=2.0, z=0.0, class_name="obstacle",
-                           confidence=0.7, source="camera")
-
-        merged = merge_detection(lidar, camera, lidar_weight=0.6)
-
-        # Same class => base = 0.9*0.6 + 0.7*0.4 = 0.82, then *1.2 = 0.984
-        expected_base = 0.9 * 0.6 + 0.7 * 0.4
-        expected = min(expected_base * 1.2, 1.0)
-        assert abs(merged.confidence - expected) < 1e-6
-
-    def test_class_agreement(self):
-        """Same class from both sensors should result in a confidence bonus."""
-        lidar = Detection(x=0.0, y=0.0, z=0.0, class_name="person",
-                          confidence=0.8, source="lidar")
-        camera = Detection(x=0.0, y=0.0, z=0.0, class_name="person",
-                           confidence=0.8, source="camera")
-
-        merged = merge_detection(lidar, camera)
-        base = 0.8 * 0.6 + 0.8 * 0.4  # 0.8
-        boosted = min(base * 1.2, 1.0)  # 0.96
-
-        assert merged.class_name == "person"
-        assert abs(merged.confidence - boosted) < 1e-6
-        # Boosted should be higher than the raw weighted average.
-        assert merged.confidence > base
-
-    def test_class_disagreement(self):
-        """Different classes should use the higher-confidence source's class."""
-        lidar = Detection(x=0.0, y=0.0, z=0.0, class_name="shelf",
-                          confidence=0.5, source="lidar")
-        camera = Detection(x=0.0, y=0.0, z=0.0, class_name="person",
-                           confidence=0.9, source="camera")
-
-        merged = merge_detection(lidar, camera)
-
-        # Camera has higher confidence, so its class wins.
-        assert merged.class_name == "person"
-        # No bonus applied on disagreement.
-        expected = 0.5 * 0.6 + 0.9 * 0.4  # 0.66
-        assert abs(merged.confidence - expected) < 1e-6
+# ===================================================================
+# Label merging
+# ===================================================================
 
 
-class TestFusionPipeline:
-    """Integration-level tests for the full fuse() function."""
+class TestMergeLabels:
 
-    def test_empty_inputs(self):
-        """No detections from either source should produce an empty output."""
-        result = fuse([], [])
+    def test_agreement_adds_fixed_bonus(self):
+        cls, conf = merge_labels("obstacle", 0.9, "obstacle", 0.7, W_LIDAR, W_CAMERA)
+        expected = 0.9 * W_LIDAR + 0.7 * W_CAMERA + AGREEMENT_BONUS
+        assert cls == "obstacle"
+        assert conf == pytest.approx(expected)
+
+    def test_agreement_is_capped_at_one(self):
+        _, conf = merge_labels("person", 1.0, "person", 1.0, W_LIDAR, W_CAMERA)
+        assert conf == 1.0
+
+    def test_disagreement_picks_more_confident_source(self):
+        cls, conf = merge_labels("shelf", 0.5, "person", 0.9, W_LIDAR, W_CAMERA)
+        assert cls == "person"
+        assert conf == pytest.approx(0.5 * W_LIDAR + 0.9 * W_CAMERA)
+
+    def test_disagreement_tie_goes_to_lidar(self):
+        cls, _ = merge_labels("shelf", 0.7, "person", 0.7, W_LIDAR, W_CAMERA)
+        assert cls == "shelf"
+
+
+# ===================================================================
+# Depth decoding
+# ===================================================================
+
+
+class TestDecodeDepth:
+
+    def test_16uc1_millimetres_to_metres(self):
+        raw = np.array([[1000, 2500]], dtype=np.uint16)
+        depth = decode_depth_image(raw.tobytes(), 1, 2, "16UC1")
+        assert depth.dtype == np.float64
+        assert depth.tolist() == [[1.0, 2.5]]
+
+    def test_32fc1_passthrough(self):
+        raw = np.array([[1.25], [3.0]], dtype=np.float32)
+        depth = decode_depth_image(raw.tobytes(), 2, 1, "32FC1")
+        assert depth.tolist() == [[1.25], [3.0]]
+
+    def test_unsupported_encoding_raises(self):
+        with pytest.raises(ValueError):
+            decode_depth_image(b"\x00" * 4, 1, 1, "rgb8")
+
+    def test_size_mismatch_raises(self):
+        with pytest.raises(ValueError):
+            decode_depth_image(b"\x00" * 6, 2, 2, "16UC1")
+
+
+# ===================================================================
+# Geometry
+# ===================================================================
+
+
+class TestGeometry:
+
+    def test_back_project_principal_point_lies_on_optical_axis(self):
+        k = CameraIntrinsics(fx=500.0, fy=500.0, cx=320.0, cy=240.0)
+        assert k.back_project(320, 240, 3.0) == pytest.approx((0.0, 0.0, 3.0))
+
+    def test_back_project_off_centre(self):
+        k = CameraIntrinsics(fx=500.0, fy=500.0, cx=320.0, cy=240.0)
+        # 100 px right of centre at 2 m -> 0.4 m right; 50 px below -> 0.2 m down.
+        assert k.back_project(420, 290, 2.0) == pytest.approx((0.4, 0.2, 2.0))
+
+    def test_identity_transform(self):
+        t = RigidTransform((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        assert t.apply((1.0, 2.0, 3.0)) == pytest.approx((1.0, 2.0, 3.0))
+
+    def test_translation_only(self):
+        t = RigidTransform((1.0, -2.0, 0.5), (0.0, 0.0, 0.0, 1.0))
+        assert t.apply((1.0, 1.0, 1.0)) == pytest.approx((2.0, -1.0, 1.5))
+
+    def test_from_rpy_yaw_quarter_turn(self):
+        t = RigidTransform.from_rpy(0.0, 0.0, math.pi / 2)
+        assert t.apply((1.0, 0.0, 0.0)) == pytest.approx((0.0, 1.0, 0.0), abs=1e-12)
+
+    def test_from_rpy_optical_convention(self):
+        # URDF <origin rpy="-pi/2 0 -pi/2"/> between a body frame (x forward, z up)
+        # and its optical frame (z forward, x right, y down).
+        optical_to_body = RigidTransform.from_rpy(-math.pi / 2, 0.0, -math.pi / 2)
+        assert optical_to_body.apply((0.0, 0.0, 1.0)) == pytest.approx((1.0, 0.0, 0.0), abs=1e-12)   # forward
+        assert optical_to_body.apply((1.0, 0.0, 0.0)) == pytest.approx((0.0, -1.0, 0.0), abs=1e-12)  # right
+        assert optical_to_body.apply((0.0, 1.0, 0.0)) == pytest.approx((0.0, 0.0, -1.0), abs=1e-12)  # down
+
+
+# ===================================================================
+# Projection
+# ===================================================================
+
+
+K = CameraIntrinsics(fx=554.25, fy=554.25, cx=320.0, cy=240.0)
+
+
+def depth_image(value: float, height: int = 480, width: int = 640) -> np.ndarray:
+    return np.full((height, width), value, dtype=np.float64)
+
+
+class TestProjection:
+
+    def test_transform_unavailable_returns_none(self):
+        result = project_camera_detections(
+            [PixelDetection(320, 240, "person", 0.9)], depth_image(3.0),
+            "camera_optical_frame", "velodyne_link", lambda target, source: None, K,
+        )
+        assert result is None
+
+    def test_pixel_outside_image_is_dropped(self):
+        identity = RigidTransform((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        result = project_camera_detections(
+            [PixelDetection(640, 240, "person", 0.9), PixelDetection(10, -1, "person", 0.9)],
+            depth_image(3.0), "cam", "lidar", lambda target, source: identity, K,
+        )
         assert result == []
 
-    def test_empty_camera(self):
-        """LiDAR detections with no camera input should pass through."""
-        lidar = [Detection(x=1.0, y=2.0, z=0.0)]
-        result = fuse(lidar, [])
-        assert len(result) == 1
-        assert result[0].x == 1.0
+    def test_invalid_depth_is_dropped(self):
+        identity = RigidTransform((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        depth = depth_image(3.0)
+        depth[240, 320] = 0.0
+        depth[100, 100] = float("nan")
+        depth[200, 200] = float("inf")
+        result = project_camera_detections(
+            [PixelDetection(320, 240, "a", 1.0), PixelDetection(100, 100, "b", 1.0),
+             PixelDetection(200, 200, "c", 1.0)],
+            depth, "cam", "lidar", lambda target, source: identity, K,
+        )
+        assert result == []
 
-    def test_empty_lidar(self):
-        """Camera detections with no LiDAR input should pass through."""
-        camera = [Detection(x=3.0, y=4.0, z=0.0, source="camera")]
-        result = fuse([], camera)
-        assert len(result) == 1
-        assert result[0].x == 3.0
+    def test_label_is_carried_through(self):
+        identity = RigidTransform((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        [result] = project_camera_detections(
+            [PixelDetection(320, 240, "pallet", 0.42)], depth_image(1.0),
+            "cam", "lidar", lambda target, source: identity, K,
+        )
+        assert (result.class_name, result.confidence) == ("pallet", 0.42)
 
-    def test_one_matched_one_unmatched(self):
-        """One matching pair plus one unmatched camera detection."""
-        lidar = [Detection(x=1.0, y=1.0, z=0.0, class_name="person", confidence=0.9)]
-        camera = [
-            Detection(x=1.05, y=1.05, z=0.0, class_name="person",
-                      confidence=0.8, source="camera"),
-            Detection(x=10.0, y=10.0, z=0.0, class_name="shelf",
-                      confidence=0.7, source="camera"),
-        ]
-        result = fuse(lidar, camera, distance_threshold=1.0)
-        assert len(result) == 2  # 1 fused + 1 unmatched camera
+    def test_lookup_is_asked_for_the_given_frames(self):
+        asked = []
+
+        def lookup(target, source):
+            asked.append((target, source))
+            return RigidTransform((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+
+        project_camera_detections([], depth_image(1.0), "camera_optical_frame", "velodyne_link", lookup, K)
+        assert asked == [("velodyne_link", "camera_optical_frame")]
