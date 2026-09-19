@@ -4,6 +4,14 @@ Sensor fusion node for the AMR perception pipeline.
 Fuses LiDAR 3D detections with camera 2D detections using depth-based
 back-projection and Hungarian-style greedy association. Publishes a unified
 Detection3DArray with merged confidence scores.
+
+The two detection streams are time-synchronised with an
+ApproximateTimeSynchronizer.  The depth image is *not* part of that
+synchroniser: on Humble, message_filters.Subscriber on sensor_msgs/Image
+raises "Unable to convert call argument to Python object" the first time a
+three-way sync fires, which kills the node.  The depth image is instead
+received on a plain subscription and the most recent frame is used, guarded
+by a maximum age relative to the camera detections.
 """
 
 from __future__ import annotations
@@ -14,6 +22,7 @@ from typing import List, Optional, Tuple
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.time import Time
 
 import message_filters
 import tf2_ros
@@ -67,6 +76,7 @@ class SensorFusionNode(Node):
         self.declare_parameter('camera_frame', 'camera_link')
         self.declare_parameter('lidar_frame', 'velodyne_link')
         self.declare_parameter('depth_topic', '/camera/depth/image_raw')
+        self.declare_parameter('depth_max_age', 0.5)
         self.declare_parameter('fusion_confidence_weight_lidar', 0.6)
         self.declare_parameter('fusion_confidence_weight_camera', 0.4)
 
@@ -91,6 +101,10 @@ class SensorFusionNode(Node):
         self._depth_topic: str = (
             self.get_parameter('depth_topic')
             .get_parameter_value().string_value
+        )
+        self._depth_max_age: float = (
+            self.get_parameter('depth_max_age')
+            .get_parameter_value().double_value
         )
         self._w_lidar: float = (
             self.get_parameter('fusion_confidence_weight_lidar')
@@ -126,25 +140,26 @@ class SensorFusionNode(Node):
             Detection3DArray, '/perception/fused_objects', 10
         )
 
-        # -- Synchronized subscribers -------------------------------------------
+        # -- Subscribers --------------------------------------------------------
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=5,
         )
 
+        # Depth image: plain subscription, latest frame cached (see module docstring).
+        self._latest_depth: Optional[Image] = None
+        self.create_subscription(Image, self._depth_topic, self._depth_callback, qos)
+
+        # Detection streams: time-synchronised.
         self._sub_lidar = message_filters.Subscriber(
             self, Detection3DArray, '/perception/obstacles_3d', qos_profile=qos
         )
         self._sub_camera = message_filters.Subscriber(
             self, Detection2DArray, '/perception/detections_camera', qos_profile=qos
         )
-        self._sub_depth = message_filters.Subscriber(
-            self, Image, self._depth_topic, qos_profile=qos
-        )
-
         self._sync = message_filters.ApproximateTimeSynchronizer(
-            [self._sub_lidar, self._sub_camera, self._sub_depth],
+            [self._sub_lidar, self._sub_camera],
             queue_size=10,
             slop=0.1,
         )
@@ -160,17 +175,23 @@ class SensorFusionNode(Node):
     # Callback
     # --------------------------------------------------------------------- #
 
+    def _depth_callback(self, msg: Image) -> None:
+        self._latest_depth = msg
+
     def _sync_callback(
         self,
         lidar_msg: Detection3DArray,
         camera_msg: Detection2DArray,
-        depth_msg: Image,
     ) -> None:
         """Time-synchronised callback: fuse LiDAR + camera detections."""
         np = _lazy_import_numpy()
 
-        # 1. Project camera 2D detections into 3D (lidar frame).
-        projected = self._project_camera_detections(camera_msg, depth_msg, np)
+        # 1. Project camera 2D detections into 3D (lidar frame) using the
+        #    most recent depth image, provided it is close enough in time.
+        projected: List[ProjectedDetection] = []
+        depth_msg = self._depth_for(camera_msg)
+        if depth_msg is not None:
+            projected = self._project_camera_detections(camera_msg, depth_msg, np)
 
         # 2. Extract LiDAR detection centres and metadata.
         lidar_centres: List[Tuple[float, float, float]] = []
@@ -232,6 +253,27 @@ class SensorFusionNode(Node):
     # --------------------------------------------------------------------- #
     # Projection helpers
     # --------------------------------------------------------------------- #
+
+    def _depth_for(self, camera_msg: Detection2DArray) -> Optional[Image]:
+        """Return the cached depth image if it is recent enough for these detections."""
+        depth_msg = self._latest_depth
+        if depth_msg is None:
+            self.get_logger().warn(
+                'No depth image received yet; camera detections not projected',
+                throttle_duration_sec=5.0,
+            )
+            return None
+
+        age = Time.from_msg(camera_msg.header.stamp) - Time.from_msg(depth_msg.header.stamp)
+        age_sec = age.nanoseconds * 1e-9
+        if abs(age_sec) > self._depth_max_age:
+            self.get_logger().warn(
+                f'Depth image is {age_sec:.2f}s from camera detections '
+                f'(limit {self._depth_max_age:.2f}s); camera detections not projected',
+                throttle_duration_sec=5.0,
+            )
+            return None
+        return depth_msg
 
     def _project_camera_detections(
         self,
