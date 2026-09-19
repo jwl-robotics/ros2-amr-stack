@@ -143,17 +143,24 @@ def decode_depth_image(data: bytes, height: int, width: int, encoding: str) -> n
 def project_camera_detections(
     detections: Sequence[PixelDetection],
     depth: np.ndarray,
-    camera_frame: str,
+    depth_frame_id: str,
     lidar_frame: str,
     lookup: TransformLookup,
     intrinsics: CameraIntrinsics,
 ) -> Optional[List[ProjectedDetection]]:
     """Back-project camera detections through the depth image into the LiDAR frame.
 
-    Returns None if the camera -> LiDAR transform is unavailable.  Detections
-    whose centre falls outside the image or on an invalid depth pixel are dropped.
+    The pinhole back-projection yields points in the optical frame the depth
+    image was captured in, so ``depth_frame_id`` must be that image's own
+    ``header.frame_id`` (e.g. ``camera_optical_frame``), not the camera body
+    link.  The two differ by the standard optical rotation, so mixing them up
+    puts forward-lying objects above the robot without raising any error.
+
+    Returns None if the transform into ``lidar_frame`` is unavailable.
+    Detections whose centre falls outside the image or on an invalid depth
+    pixel are dropped.
     """
-    transform = lookup(lidar_frame, camera_frame)
+    transform = lookup(lidar_frame, depth_frame_id)
     if transform is None:
         return None
 

@@ -222,7 +222,9 @@ Runs YOLOv8 inference on RGB frames from the RealSense D435. Detected 2D boundin
 
 ### Sensor Fusion (`sensor_fusion_node`)
 
-Performs greedy nearest-neighbour association between LiDAR and camera detections within a configurable distance threshold. Matched pairs are merged using weighted confidence averaging, with a bonus applied when both sensors agree on the class label.
+Back-projects each camera detection through the depth image and transforms it into the LiDAR frame, taking the source frame from the depth image's own `header.frame_id` (the optical frame) rather than a configured name. Then performs greedy nearest-neighbour association between LiDAR and camera detections within a configurable distance threshold. Matched pairs are merged using weighted confidence averaging, with a bonus applied when both sensors agree on the class label.
+
+The geometry and association rules live in `amr_perception/fusion_logic.py`, which has no ROS dependency; the node is a thin adapter around it. Likewise the tracker's rules live in `amr_perception/tracking_logic.py`.
 
 ### Object Tracker (`object_tracker_node`)
 
@@ -284,8 +286,10 @@ pytest test/test_obstacle_detector.py::TestClassifyCluster::test_classify_person
 
 The tests cover:
 - **Obstacle detector:** PointCloud2 binary parsing, geometric classification rules, DBSCAN clustering behaviour
-- **Sensor fusion:** Detection association (matched/unmatched), confidence merging, class agreement/disagreement handling
-- **Object tracker:** Track creation, association, lifecycle (confirmation and loss), velocity estimation
+- **Sensor fusion:** Depth decoding, pinhole back-projection, rigid transforms (including the optical-frame convention), projection into the LiDAR frame, detection association, confidence merging, class agreement/disagreement handling
+- **Object tracker:** Track creation, association, EMA position/velocity smoothing, lifecycle (confirmation and loss)
+
+The fusion and tracker tests import the same `fusion_logic` / `tracking_logic` modules the nodes run, so they test the shipped algorithm rather than a copy of it.
 
 ### Benchmark
 
@@ -301,7 +305,7 @@ The GitHub Actions pipeline (`.github/workflows/ci.yml`) runs three jobs on ever
 
 1. **Build** -- Builds the Docker image and runs `colcon build` inside the container.
 2. **Lint** -- Runs `flake8` on Python sources and `clang-format` on C++ sources.
-3. **Test** -- Runs the `pytest` unit test suite covering perception logic (28 tests).
+3. **Test** -- Runs the `pytest` unit test suite covering perception logic (53 tests).
 
 ## License
 

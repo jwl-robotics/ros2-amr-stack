@@ -59,7 +59,6 @@ class SensorFusionNode(Node):
 
         # -- Parameters ----------------------------------------------------------
         self.declare_parameter('association_distance_threshold', 1.0)
-        self.declare_parameter('camera_frame', 'camera_link')
         self.declare_parameter('lidar_frame', 'velodyne_link')
         self.declare_parameter('depth_topic', '/camera/depth/image_raw')
         self.declare_parameter('depth_max_age', 0.5)
@@ -73,7 +72,6 @@ class SensorFusionNode(Node):
         self.declare_parameter('camera_cy', 240.0)
 
         self._assoc_thresh: float = self._double('association_distance_threshold')
-        self._camera_frame: str = self._string('camera_frame')
         self._lidar_frame: str = self._string('lidar_frame')
         self._depth_topic: str = self._string('depth_topic')
         self._depth_max_age: float = self._double('depth_max_age')
@@ -221,6 +219,16 @@ class SensorFusionNode(Node):
 
     def _project(self, camera_msg: Detection2DArray, depth_msg: Image) -> List[ProjectedDetection]:
         """Back-project the camera detections into the LiDAR frame."""
+        # The back-projected points are expressed in the frame the depth image
+        # was captured in, so that frame comes from the image itself.
+        depth_frame = depth_msg.header.frame_id
+        if not depth_frame:
+            self.get_logger().warn(
+                'Depth image has no frame_id; camera detections not projected',
+                throttle_duration_sec=5.0,
+            )
+            return []
+
         try:
             depth = decode_depth_image(
                 depth_msg.data, depth_msg.height, depth_msg.width, depth_msg.encoding
@@ -239,7 +247,7 @@ class SensorFusionNode(Node):
         ]
 
         projected = project_camera_detections(
-            pixels, depth, self._camera_frame, self._lidar_frame,
+            pixels, depth, depth_frame, self._lidar_frame,
             self._lookup_transform, self._intrinsics,
         )
         return projected if projected is not None else []

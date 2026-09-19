@@ -185,7 +185,48 @@ def depth_image(value: float, height: int = 480, width: int = 640) -> np.ndarray
     return np.full((height, width), value, dtype=np.float64)
 
 
+# Frames as in amr.urdf.xacro: camera_link is x-forward and sits ahead of and
+# below the LiDAR; camera_optical_frame hangs off it by the optical rotation.
+LIDAR_FROM_CAMERA_LINK = RigidTransform((0.3, 0.0, -0.4), (0.0, 0.0, 0.0, 1.0))
+LIDAR_FROM_CAMERA_OPTICAL = RigidTransform.from_rpy(
+    -math.pi / 2, 0.0, -math.pi / 2, translation=LIDAR_FROM_CAMERA_LINK.translation
+)
+TF_TREE = {
+    ("velodyne_link", "camera_link"): LIDAR_FROM_CAMERA_LINK,
+    ("velodyne_link", "camera_optical_frame"): LIDAR_FROM_CAMERA_OPTICAL,
+}
+
+
 class TestProjection:
+
+    def test_depth_in_optical_frame_lands_ahead_of_the_robot(self):
+        """Regression: a depth image stamped in the optical frame must be
+        transformed out of *that* frame.  Treating it as camera_link (both
+        transforms exist in the tree) would put a 3 m-ahead object 3 m up."""
+        [result] = project_camera_detections(
+            [PixelDetection(320, 240, "person", 0.9)],
+            depth_image(3.0),
+            "camera_optical_frame",
+            "velodyne_link",
+            lambda target, source: TF_TREE.get((target, source)),
+            K,
+        )
+        # 3 m along the optical axis -> 3 m forward of camera_link -> offset into the LiDAR frame.
+        assert (result.x, result.y, result.z) == pytest.approx((3.3, 0.0, -0.4), abs=1e-9)
+
+    def test_pixel_right_of_centre_lands_to_the_right(self):
+        # Optical +x (image right) is body -y (robot right).
+        [result] = project_camera_detections(
+            [PixelDetection(320 + 277, 240, "pallet", 0.5)],  # ~1 m right at 2 m depth
+            depth_image(2.0),
+            "camera_optical_frame",
+            "velodyne_link",
+            lambda target, source: TF_TREE.get((target, source)),
+            K,
+        )
+        assert result.x == pytest.approx(2.3, abs=1e-9)
+        assert result.y == pytest.approx(-277 * 2.0 / 554.25, abs=1e-9)
+        assert result.z == pytest.approx(-0.4, abs=1e-9)
 
     def test_transform_unavailable_returns_none(self):
         result = project_camera_detections(
